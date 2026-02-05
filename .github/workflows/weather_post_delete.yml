@@ -28,23 +28,24 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Post or delete (manual run posts immediately)
+      - name: Post / delete (manual run posts immediately)
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
+          SEND_NOW: "1"
         run: |
           echo "Event: $GITHUB_EVENT_NAME"
           HOUR_UTC=$(date -u +%H)
           echo "UTC hour: $HOUR_UTC"
 
-          # Если нажали "Run workflow" вручную — сразу публикуем пост
+          # Ручной запуск: публикуем сразу
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
             echo "Manual run -> posting now"
-            python bot.py
+            python bot.py --now || python bot.py
             exit 0
           fi
 
-          # Запуски по расписанию
+          # По расписанию: 06:00 MSK постим, 18:00 MSK удаляем
           if [ "$HOUR_UTC" = "03" ]; then
             echo "Scheduled 06:00 MSK -> posting"
             python bot.py
