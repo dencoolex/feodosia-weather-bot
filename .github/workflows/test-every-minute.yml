@@ -1,12 +1,13 @@
-name: Morning bot (06:00 MSK)
+name: Morning bot (post 06:00, delete 18:00 MSK)
 
 on:
   schedule:
-    - cron: "0 3 * * *"   # 06:00 Europe/Moscow (UTC+3)
+    - cron: "0 3 * * *"    # 06:00 MSK (UTC+3)
+    - cron: "0 15 * * *"   # 18:00 MSK (UTC+3)
   workflow_dispatch:
 
 jobs:
-  post:
+  run:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,9 +21,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run bot (send now)
+      # В 03:00 UTC постим (python bot.py), в 15:00 UTC удаляем (python bot.py --delete)
+      - name: Post or delete depending on UTC hour
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
-          SEND_NOW: "1"
-        run: python bot.py --now || python bot.py
+        run: |
+          HOUR_UTC=$(date -u +%H)
+          echo "UTC hour: $HOUR_UTC"
+          if [ "$HOUR_UTC" = "03" ]; then
+            python bot.py
+          elif [ "$HOUR_UTC" = "15" ]; then
+            python bot.py --delete
+          else
+            echo "Not a scheduled hour for action. Exiting."
+          fi
