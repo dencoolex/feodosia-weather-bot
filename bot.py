@@ -1,46 +1,33 @@
-# bot.py
-# Утренний пост в 06:00 (Europe/Moscow): актуальная погода Феодосии + гороскоп (50 фраз по очереди).
-# Хранит индекс гороскопа в state.json.
-#
-# ENV:
-# - BOT_TOKEN
-# - CHANNEL_ID
-#
-# requirements:
-# requests==2.32.3
-
 import os
-import time
 import sys
 import json
+import time
+import argparse
 from datetime import datetime, time as dtime
 from zoneinfo import ZoneInfo
-
 import requests
 
-# ====== Настройки ======
 LAT = 45.053637
 LON = 35.390155
 TZ = "Europe/Moscow"
-TARGET_HOUR = 6
+
+POST_HOUR = 6
+DELETE_HOUR = 18
 
 RETRIES = 2
-BACKOFF_BASE = 2  # секунды
-
+BACKOFF_BASE = 2
 STATE_PATH = "state.json"
-# =======================
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHANNEL_ID = os.environ.get("CHANNEL_ID")
 
 if not BOT_TOKEN:
-    print("ERROR: BOT_TOKEN is not set in environment", file=sys.stderr)
+    print("ERROR: BOT_TOKEN is not set", file=sys.stderr)
     sys.exit(1)
 if not CHANNEL_ID:
-    print("ERROR: CHANNEL_ID is not set in environment", file=sys.stderr)
+    print("ERROR: CHANNEL_ID is not set", file=sys.stderr)
     sys.exit(1)
 
-# ВАЖНО: в HTML-режиме нельзя отправлять "сырые" < и >, поэтому используем только разрешённые теги.
 HOROSCOPE_LINES = [
     "🔮 <b>Гороскоп дня:</b> Сегодня лучше завершать начатое — результат порадует.",
     "🌟 <b>Гороскоп дня:</b> День благоприятен для новых знакомств и общения.",
@@ -95,25 +82,17 @@ HOROSCOPE_LINES = [
 
 def load_state():
     if not os.path.exists(STATE_PATH):
-        return {"horoscope_index": 0}
+        return {}
     try:
         with open(STATE_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
-            if not isinstance(data, dict):
-                return {"horoscope_index": 0}
-            return data
+            return data if isinstance(data, dict) else {}
     except Exception:
-        return {"horoscope_index": 0}
+        return {}
 
 def save_state(state):
     with open(STATE_PATH, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False)
-
-def get_horoscope_and_advance(state):
-    idx = int(state.get("horoscope_index", 0) or 0)
-    line = HOROSCOPE_LINES[idx % len(HOROSCOPE_LINES)]
-    state["horoscope_index"] = (idx + 1) % len(HOROSCOPE_LINES)
-    return line
 
 def request_json(url: str, params: dict, retries: int = RETRIES):
     last_exc = None
@@ -124,11 +103,8 @@ def request_json(url: str, params: dict, retries: int = RETRIES):
             return resp.json()
         except requests.RequestException as e:
             last_exc = e
-            print(f"[request_json] attempt {attempt} error: {e}", file=sys.stderr)
             if attempt < retries:
-                wait = BACKOFF_BASE * (attempt + 1)
-                print(f"[request_json] sleeping {wait}s before retry...", file=sys.stderr)
-                time.sleep(wait)
+                time.sleep(BACKOFF_BASE * (attempt + 1))
     raise last_exc
 
 def pick_hour_value(data: dict, hour_str: str, field: str):
@@ -159,8 +135,7 @@ def first_or_none(x):
 
 def get_weather_text(now: datetime):
     tz = ZoneInfo(TZ)
-    target_dt = datetime.combine(now.date(), dtime(hour=TARGET_HOUR), tzinfo=tz)
-
+    target_dt = datetime.combine(now.date(), dtime(hour=POST_HOUR), tzinfo=tz)
     hour_str = build_hour_string_for_api(target_dt)
     time_label = target_dt.strftime("%H:%M")
 
@@ -174,7 +149,6 @@ def get_weather_text(now: datetime):
             "timezone": TZ,
         },
     )
-
     marine = request_json(
         "https://marine-api.open-meteo.com/v1/marine",
         {
@@ -209,7 +183,13 @@ def get_weather_text(now: datetime):
         f"📈 <b>Сегодня:</b> {fmt_int(tmin,'°')}…{fmt_int(tmax,'°')} • <b>Осадки:</b> {fmt_1(psum,' мм')}"
     )
 
-def send_message_html(text: str):
+def get_horoscope_and_advance(state):
+    idx = int(state.get("horoscope_index", 0) or 0)
+    line = HOROSCOPE_LINES[idx % len(HOROSCOPE_LINES)]
+    state["horoscope_index"] = (idx + 1) % len(HOROSCOPE_LINES)
+    return line
+
+def tg_send_message_html(text: str) -> int:
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": CHANNEL_ID,
@@ -219,31 +199,57 @@ def send_message_html(text: str):
     }
     r = requests.post(url, json=payload, timeout=30)
     r.raise_for_status()
-    print("[send_message] OK")
+    data = r.json()
+    # Возвращаем message_id, чтобы потом удалить
+    return data["result"]["message_id"]
 
-def main():
+def tg_delete_message(message_id: int):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteMessage"
+    payload = {"chat_id": CHANNEL_ID, "message_id": int(message_id)}
+    r = requests.post(url, json=payload, timeout=30)
+    r.raise_for_status()
+
+def main(argv=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--delete", action="store_true", help="delete the morning message")
+    args = parser.parse_args(argv or [])
+
     tz = ZoneInfo(TZ)
     now = datetime.now(tz)
-
-    # Отправляем только если сейчас 06:xx по TZ
-    if now.hour != TARGET_HOUR:
-        print(f"[main] Not {TARGET_HOUR:02d}:00 in {TZ} now ({now:%H:%M}). Skip.")
-        return
-
     state = load_state()
 
-    weather_text = get_weather_text(now)
+    if args.delete:
+        # Удаляем в 18:00
+        if now.hour != DELETE_HOUR:
+            print(f"[delete] Not {DELETE_HOUR:02d}:00 in {TZ} now ({now:%H:%M}). Skip.")
+            return
+
+        mid = state.get("last_message_id")
+        if not mid:
+            print("[delete] No last_message_id in state.json. Nothing to delete.")
+            return
+
+        tg_delete_message(int(mid))
+        print("[delete] OK")
+        state.pop("last_message_id", None)
+        save_state(state)
+        return
+
+    # Постим в 06:00
+    if now.hour != POST_HOUR:
+        print(f"[post] Not {POST_HOUR:02d}:00 in {TZ} now ({now:%H:%M}). Skip.")
+        return
+
+    weather = get_weather_text(now)
     horoscope = get_horoscope_and_advance(state)
+    post = f"{weather}\n\n{horoscope}"
 
-    post = f"{weather_text}\n\n{horoscope}"
+    message_id = tg_send_message_html(post)
+    print(f"[post] OK message_id={message_id}")
 
-    # Сначала отправляем. Если отправка успешна — сохраняем state.
-    send_message_html(post)
+    state["last_message_id"] = message_id
     save_state(state)
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        print(f"[fatal] {e}", file=sys.stderr)
-        sys.exit(2)
+    main()
+
