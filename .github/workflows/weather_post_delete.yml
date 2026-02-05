@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write   # нужно, чтобы git push работал через GITHUB_TOKEN
+  contents: write
 
 jobs:
   run:
@@ -16,7 +16,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          persist-credentials: true  # чтобы можно было пушить обратно
+          persist-credentials: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -28,29 +28,38 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Post or delete depending on UTC hour
+      - name: Post or delete (manual run posts immediately)
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
         run: |
+          echo "Event: $GITHUB_EVENT_NAME"
           HOUR_UTC=$(date -u +%H)
           echo "UTC hour: $HOUR_UTC"
 
+          # Если нажали "Run workflow" вручную — сразу публикуем пост
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "Manual run -> posting now"
+            python bot.py
+            exit 0
+          fi
+
+          # Запуски по расписанию
           if [ "$HOUR_UTC" = "03" ]; then
-            echo "Posting morning message..."
+            echo "Scheduled 06:00 MSK -> posting"
             python bot.py
           elif [ "$HOUR_UTC" = "15" ]; then
-            echo "Deleting morning message..."
+            echo "Scheduled 18:00 MSK -> deleting"
             python bot.py --delete
           else
             echo "Not a scheduled hour. Exit."
           fi
 
-      - name: Commit state.json (save last_message_id / horoscope index)
+      - name: Commit state.json
         run: |
           git config user.email "weatherbot@example.com"
           git config user.name "weatherbot"
           git add state.json
-          git commit -m "Update state.json" || echo "No changes to commit"
+          git diff --cached --quiet && echo "No changes to commit" && exit 0
+          git commit -m "Update state.json"
           git push
-
