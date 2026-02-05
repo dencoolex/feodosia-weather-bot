@@ -1,27 +1,18 @@
-name: Test bot every minute
+import os
+import requests
+from datetime import datetime
 
-on:
-  schedule:
-    - cron: "* * * * *"
-  workflow_dispatch:
+BOT_TOKEN = os.environ["BOT_TOKEN"]
+CHANNEL_ID = os.environ["CHANNEL_ID"]
 
-jobs:
-  post:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+def send_message(text: str):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    r = requests.post(url, json={"chat_id": CHANNEL_ID, "text": text}, timeout=30)
+    r.raise_for_status()
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+def main():
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    send_message(f"Тест: бот работает. Время: {now}")
 
-      - name: Install deps
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Run bot
-        env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
-        run: python bot.py
+if __name__ == "__main__":
+    main()
