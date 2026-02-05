@@ -1,37 +1,46 @@
 # bot.py
-# Отправляет актуальную погоду Феодосии + очередной гороскоп.
-# Для теста: можно запустить с env SEND_NOW=1 или аргументом --now, тогда отправка произойдёт сразу.
+# Утренний пост в 06:00 (Europe/Moscow): актуальная погода Феодосии + гороскоп (50 фраз по очереди).
+# Хранит индекс гороскопа в state.json.
+#
+# ENV:
+# - BOT_TOKEN
+# - CHANNEL_ID
+#
+# requirements:
+# requests==2.32.3
 
 import os
+import time
 import sys
 import json
-import time
-import argparse
 from datetime import datetime, time as dtime
 from zoneinfo import ZoneInfo
 
 import requests
 
-# Настройки
+# ====== Настройки ======
 LAT = 45.053637
 LON = 35.390155
 TZ = "Europe/Moscow"
-TARGET_HOUR = 6  # по умолчанию отправляем в 06:00 MSK
+TARGET_HOUR = 6
+
 RETRIES = 2
-BACKOFF_BASE = 2
+BACKOFF_BASE = 2  # секунды
+
 STATE_PATH = "state.json"
+# =======================
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHANNEL_ID = os.environ.get("CHANNEL_ID")
-SEND_NOW_ENV = os.environ.get("SEND_NOW")  # если "1" - отправляем независимо от часа
 
 if not BOT_TOKEN:
-    print("ERROR: BOT_TOKEN is not set", file=sys.stderr)
+    print("ERROR: BOT_TOKEN is not set in environment", file=sys.stderr)
     sys.exit(1)
 if not CHANNEL_ID:
-    print("ERROR: CHANNEL_ID is not set", file=sys.stderr)
+    print("ERROR: CHANNEL_ID is not set in environment", file=sys.stderr)
     sys.exit(1)
 
+# ВАЖНО: в HTML-режиме нельзя отправлять "сырые" < и >, поэтому используем только разрешённые теги.
 HOROSCOPE_LINES = [
     "🔮 <b>Гороскоп дня:</b> Сегодня лучше завершать начатое — результат порадует.",
     "🌟 <b>Гороскоп дня:</b> День благоприятен для новых знакомств и общения.",
@@ -81,7 +90,7 @@ HOROSCOPE_LINES = [
     "🌿 <b>Гороскоп дня:</b> Спокойный разговор сегодня решит больше, чем спор.",
     "🧭 <b>Гороскоп дня:</b> Держите курс на главное — остальное подождёт.",
     "☕ <b>Гороскоп дня:</b> Начните утро без суеты — и день сложится легче.",
-    "🎈 <b>Гороскоп дня:</b> Добавьте радости в рутину — это даст энергию."
+    "🎈 <b>Гороскоп дня:</b> Добавьте радости в рутину — это даст энергию.",
 ]
 
 def load_state():
@@ -117,7 +126,9 @@ def request_json(url: str, params: dict, retries: int = RETRIES):
             last_exc = e
             print(f"[request_json] attempt {attempt} error: {e}", file=sys.stderr)
             if attempt < retries:
-                time.sleep(BACKOFF_BASE * (attempt + 1))
+                wait = BACKOFF_BASE * (attempt + 1)
+                print(f"[request_json] sleeping {wait}s before retry...", file=sys.stderr)
+                time.sleep(wait)
     raise last_exc
 
 def pick_hour_value(data: dict, hour_str: str, field: str):
@@ -149,6 +160,7 @@ def first_or_none(x):
 def get_weather_text(now: datetime):
     tz = ZoneInfo(TZ)
     target_dt = datetime.combine(now.date(), dtime(hour=TARGET_HOUR), tzinfo=tz)
+
     hour_str = build_hour_string_for_api(target_dt)
     time_label = target_dt.strftime("%H:%M")
 
@@ -162,6 +174,7 @@ def get_weather_text(now: datetime):
             "timezone": TZ,
         },
     )
+
     marine = request_json(
         "https://marine-api.open-meteo.com/v1/marine",
         {
@@ -208,28 +221,23 @@ def send_message_html(text: str):
     r.raise_for_status()
     print("[send_message] OK")
 
-def main(argv=None):
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--now", action="store_true", help="send now regardless of hour")
-    args = parser.parse_args(argv or [])
-
+def main():
     tz = ZoneInfo(TZ)
     now = datetime.now(tz)
 
-    send_now_flag = args.now or (SEND_NOW_ENV == "1")
-
-    # Если не принудительная отправка, то отправляем только в TARGET_HOUR
-    if not send_now_flag:
-        if now.hour != TARGET_HOUR:
-            print(f"[main] Not {TARGET_HOUR:02d}:00 in {TZ} now ({now:%H:%M}). Skip.")
-            return
+    # Отправляем только если сейчас 06:xx по TZ
+    if now.hour != TARGET_HOUR:
+        print(f"[main] Not {TARGET_HOUR:02d}:00 in {TZ} now ({now:%H:%M}). Skip.")
+        return
 
     state = load_state()
+
     weather_text = get_weather_text(now)
     horoscope = get_horoscope_and_advance(state)
+
     post = f"{weather_text}\n\n{horoscope}"
 
-    print("[main] message preview:\n" + post)
+    # Сначала отправляем. Если отправка успешна — сохраняем state.
     send_message_html(post)
     save_state(state)
 
