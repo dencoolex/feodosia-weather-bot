@@ -4,7 +4,7 @@ on:
   schedule:
     - cron: "0 3 * * *"    # 06:00 MSK (UTC+3)
     - cron: "0 15 * * *"   # 18:00 MSK (UTC+3)
-  workflow_dispatch:       # можно запускать вручную, но он будет работать ТОЛЬКО в 06:00/18:00 по логике bot.py
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -13,13 +13,11 @@ jobs:
   run:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           persist-credentials: true
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
@@ -28,13 +26,21 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # ВАЖНО: без "автозапуска" сейчас/форс-режима.
-      # Бот сам решит: в 06:00 отправить, в 18:00 удалить, в другое время — Skip.
-      - name: Run bot
+      - name: Run bot (post at 06:00 MSK, delete at 18:00 MSK)
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
-        run: python bot.py
+        run: |
+          HOUR_UTC=$(date -u +%H)
+          echo "UTC hour: $HOUR_UTC"
+
+          if [ "$HOUR_UTC" = "03" ]; then
+            python bot.py
+          elif [ "$HOUR_UTC" = "15" ]; then
+            python bot.py --delete
+          else
+            echo "Not a scheduled hour. Exit."
+          fi
 
       - name: Commit state.json
         run: |
@@ -44,4 +50,3 @@ jobs:
           git diff --cached --quiet && echo "No changes to commit" && exit 0
           git commit -m "Update state.json"
           git push
-
