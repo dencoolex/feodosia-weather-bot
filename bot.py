@@ -1,10 +1,7 @@
 # bot.py
-# Публикует утренний пост в Telegram с прогнозом для Феодосии.
-# Поведение:
-# - По умолчанию использует текущее время запуска (удобно для ручного теста).
-# - Если запускать по cron ровно в 06:00 (timezone Europe/Moscow), пост будет с меткой 06:00.
+# Публикует утренний пост в Telegram СТРОГО в 06:00 по Europe/Moscow.
 #
-# Перед запуском в среде (GitHub Actions или локально) задайте переменные окружения:
+# Переменные окружения:
 # - BOT_TOKEN (telegram bot token)
 # - CHANNEL_ID (например @feo_sea или numeric chat id -1001234567890)
 #
@@ -17,27 +14,23 @@
 import os
 import time
 import sys
-from datetime import datetime, date, time as dtime
+from datetime import datetime, time as dtime
 from zoneinfo import ZoneInfo
 
 import requests
 
-# ====== Настройки (можно менять) ======
+# ====== Настройки ======
 LAT = 45.053637
 LON = 35.390155
 TZ = "Europe/Moscow"
 
-# Если True — используем текущее время запуска (удобно для теста). Если False — фиксируем TARGET_HOUR.
-USE_CURRENT_HOUR = True
-
-# Час (0-23), для которого берём прогноз, если USE_CURRENT_HOUR=False
+# Отправляем только в этот час (0-23) по TZ
 TARGET_HOUR = 6
 
 # Retry/backoff
 RETRIES = 2
-BACKOFF_BASE = 2  # секунды, умножается на попытку (exponential-ish)
-
-# ======================================
+BACKOFF_BASE = 2  # секунды
+# =======================
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHANNEL_ID = os.environ.get("CHANNEL_ID")
@@ -78,21 +71,15 @@ def pick_hour_value(data: dict, hour_str: str, field: str):
         idx = times.index(hour_str)
     except ValueError:
         return None
-    if idx < len(values):
-        return values[idx]
-    return None
+    return values[idx] if idx < len(values) else None
 
 
 def send_message(text: str):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {"chat_id": CHANNEL_ID, "text": text, "disable_web_page_preview": True}
-    try:
-        r = requests.post(url, json=payload, timeout=30)
-        r.raise_for_status()
-        print("[send_message] OK")
-    except requests.RequestException as e:
-        print(f"[send_message] error: {e}", file=sys.stderr)
-        raise
+    r = requests.post(url, json=payload, timeout=30)
+    r.raise_for_status()
+    print("[send_message] OK")
 
 
 def fmt_int(x, suffix=""):
@@ -120,18 +107,18 @@ def main():
     tz = ZoneInfo(TZ)
     now = datetime.now(tz)
 
-    if USE_CURRENT_HOUR:
-        target_dt = now.replace(minute=0, second=0, microsecond=0)
-    else:
-        today_in_tz = now.date()
-        target_dt = datetime.combine(today_in_tz, dtime(hour=TARGET_HOUR), tzinfo=tz)
+    # Строгая защита: отправляем только если сейчас 06:xx по Europe/Moscow
+    if now.hour != TARGET_HOUR:
+        print(f"[main] Not {TARGET_HOUR:02d}:00 in {TZ} now ({now:%H:%M}). Skip.")
+        return
+
+    # Берём прогноз на 06:00 текущего дня по TZ
+    target_dt = datetime.combine(now.date(), dtime(hour=TARGET_HOUR), tzinfo=tz)
 
     hour_str = build_hour_string_for_api(target_dt)
     time_label = target_dt.strftime("%H:%M")
-
     print(f"[main] target hour: {hour_str} (label {time_label})")
 
-    # Получаем прогнозы
     forecast = request_json(
         "https://api.open-meteo.com/v1/forecast",
         {
@@ -153,7 +140,6 @@ def main():
         },
     )
 
-    # Извлечение значений
     air = pick_hour_value(forecast, hour_str, "temperature_2m")
     feels = pick_hour_value(forecast, hour_str, "apparent_temperature")
     wind = pick_hour_value(forecast, hour_str, "wind_speed_10m")
@@ -166,7 +152,6 @@ def main():
     tmin = first_or_none(daily.get("temperature_2m_min"))
     psum = first_or_none(daily.get("precipitation_sum"))
 
-    # Build wind part
     wind_part = fmt_int(wind, " м/с")
     if wind_dir is not None:
         wind_part += f" (напр. {round(wind_dir)}°)"
@@ -179,7 +164,6 @@ def main():
         f"Сегодня: {fmt_int(tmin,'°')}…{fmt_int(tmax,'°')} • Осадки: {fmt_1(psum,' мм')}"
     )
 
-    # Печатаем текст в лог (удобно для Actions) и отправляем
     print("[main] message:\n" + text)
     send_message(text)
 
