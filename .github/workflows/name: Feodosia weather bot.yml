@@ -1,8 +1,9 @@
-name: Feodosia weather (short runs)
+# .github/workflows/weather.yml
+name: Feodosia weather (12:00 MSK window)
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "*/5 * * * *"  # каждые 5 минут, бот отправит 1 раз в окне 12:00–12:09 MSK
   workflow_dispatch:
 
 permissions:
@@ -35,7 +36,6 @@ jobs:
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
         run: |
           python bot.py
-          python bot.py --delete
 
       - name: Commit state.json
         run: |
@@ -45,6 +45,3 @@ jobs:
           git diff --cached --quiet && echo "No changes to commit" && exit 0
           git commit -m "Update state.json"
           git push
-
-
-
