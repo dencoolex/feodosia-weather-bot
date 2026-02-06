@@ -1,9 +1,9 @@
-name: Feodosia weather (post 06:00 MSK, delete 18:00 MSK)
+name: Feodosia weather (post 09:08 MSK, delete 21:08 MSK)
 
 on:
   schedule:
-    - cron: "0 3 * * *"    # 06:00 MSK (UTC+3)
-    - cron: "0 15 * * *"   # 18:00 MSK (UTC+3)
+    - cron: "8 6 * * *"    # 09:08 MSK (UTC+3)
+    - cron: "8 18 * * *"   # 21:08 MSK (UTC+3)
   workflow_dispatch:
 
 permissions:
@@ -26,21 +26,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run bot (post at 06:00 MSK, delete at 18:00 MSK)
+      # Важно: убрали проверки UTC часа.
+      # bot.py сам решает по времени MSK: постить/удалять/пропустить.
+      - name: Run bot
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
         run: |
-          HOUR_UTC=$(date -u +%H)
-          echo "UTC hour: $HOUR_UTC"
-
-          if [ "$HOUR_UTC" = "03" ]; then
-            python bot.py
-          elif [ "$HOUR_UTC" = "15" ]; then
-            python bot.py --delete
-          else
-            echo "Not a scheduled hour. Exit."
-          fi
+          python bot.py
+          python bot.py --delete
 
       - name: Commit state.json
         run: |
@@ -50,3 +44,4 @@ jobs:
           git diff --cached --quiet && echo "No changes to commit" && exit 0
           git commit -m "Update state.json"
           git push
+
