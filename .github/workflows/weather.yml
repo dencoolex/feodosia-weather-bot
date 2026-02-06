@@ -1,8 +1,13 @@
-name: Feodosia weather (13:00 MSK)
+# .github/workflows/weather.yml
+name: Feodosia weather (06:00 MSK)
 
 on:
+  # GitHub cron = UTC, поэтому 06:00 МСК = 03:00 UTC
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "0 3 * * *"
+    - cron: "5 3 * * *"
+    - cron: "10 3 * * *"
+    - cron: "15 3 * * *"
   workflow_dispatch:
 
 permissions:
