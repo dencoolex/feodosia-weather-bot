@@ -13,16 +13,16 @@ LAT = 45.053637
 LON = 35.390155
 TZ = "Europe/Moscow"
 
-# ОКНА ВРЕМЕНИ (MSK):
-# Пост: примерно в 10:50 (окно 10:50–10:59)
-# Удаление: примерно в 22:50 (окно 22:50–22:59)
-POST_HOUR = 10
-POST_START_MINUTE = 50
+# ТЕСТОВОЕ ОКНО (MSK):
+# Пост: примерно в 11:15 (окно 11:15–11:24)
+# Удаление: примерно в 23:15 (окно 23:15–23:24)
+POST_HOUR = 11
+POST_START_MINUTE = 15
 
-DELETE_HOUR = 22
-DELETE_START_MINUTE = 50
+DELETE_HOUR = 23
+DELETE_START_MINUTE = 15
 
-WINDOW_MINUTES = 10  # 10 минут: 50..59
+WINDOW_MINUTES = 10  # 10 минут
 
 RETRIES = 2
 BACKOFF_BASE = 2
@@ -158,11 +158,8 @@ def in_window(now: datetime, hour: int, start_minute: int, window_minutes: int) 
 
 def get_weather_text(now: datetime):
     tz = ZoneInfo(TZ)
-
-    # В тексте показываем фактическое время отправки
     time_label = now.strftime("%H:%M")
 
-    # Для hourly берём ближайший час вниз (например 10:54 -> 10:00), чтобы не было "—"
     api_dt = datetime.combine(now.date(), dtime(hour=now.hour, minute=0), tzinfo=tz)
     hour_str = build_hour_string_for_api(api_dt)
 
@@ -251,7 +248,6 @@ def main(argv=None):
     if args.delete:
         if not in_window(now, DELETE_HOUR, DELETE_START_MINUTE, WINDOW_MINUTES):
             return
-
         if state.get("last_delete_date") == now.date().isoformat():
             return
 
@@ -267,7 +263,6 @@ def main(argv=None):
     # post
     if not in_window(now, POST_HOUR, POST_START_MINUTE, WINDOW_MINUTES):
         return
-
     if state.get("last_post_date") == now.date().isoformat():
         return
 
@@ -284,10 +279,4 @@ def main(argv=None):
 
 if __name__ == "__main__":
     main()
-
-
-
-if __name__ == "__main__":
-    main()
-
 
