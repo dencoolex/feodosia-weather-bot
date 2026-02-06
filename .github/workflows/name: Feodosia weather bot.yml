@@ -1,11 +1,8 @@
-name: Feodosia weather (around 10:00 MSK, delete around 22:00 MSK)
+name: Feodosia weather (short runs)
 
 on:
   schedule:
-    # Каждые 5 минут с 10:00 до 10:19 MSK (UTC+3 => 07:00-07:19 UTC)
-    - cron: "*/5 7 * * *"
-    # Каждые 5 минут с 22:00 до 22:19 MSK (UTC+3 => 19:00-19:19 UTC)
-    - cron: "*/5 19 * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -48,5 +45,6 @@ jobs:
           git diff --cached --quiet && echo "No changes to commit" && exit 0
           git commit -m "Update state.json"
           git push
+
 
 
