@@ -179,10 +179,73 @@ def get_weather_text(now: datetime) -> str:
 
     air = pick_hour_value(forecast, hour_str, "temperature_2m")
     feels = pick_hour_value(forecast, hour_str, "apparent_temperature")
-    wind = pick_hour_value(forecast, hour        run: |
-          git config user.email "weatherbot@example.com"
-          git config user.name "weatherbot"
-          git add state.json
-          git diff --cached --quiet && echo "No changes to commit" && exit 0
-          git commit -m "Update state.json"
-          git push
+    wind = pick_hour_value(forecast, hour_str, "wind_speed_10m")
+    wind_dir = pick_hour_value(forecast, hour_str, "winddirection_10m")
+    precip = pick_hour_value(forecast, hour_str, "precipitation")
+    sea = pick_hour_value(marine, hour_str, "sea_surface_temperature")
+
+    daily = forecast.get("daily", {}) or {}
+    tmax = first_or_none(daily.get("temperature_2m_max"))
+    tmin = first_or_none(daily.get("temperature_2m_min"))
+    psum = first_or_none(daily.get("precipitation_sum"))
+
+    wind_part = fmt_int(wind, " м/с")
+    if wind_dir is not None:
+        wind_part += f" (напр. {round(wind_dir)}°)"
+
+    time_label = now.strftime("%H:%M")
+
+    return (
+        f"🌞 <b>Феодосия</b> {time_label}\n\n"
+        f"🌡️ <b>Воздух:</b> {fmt_int(air,'°')} (ощущается {fmt_int(feels,'°')})\n\n"
+        f"💨 <b>Ветер:</b> {wind_part} • <b>Осадки:</b> {fmt_1(precip,' мм')}\n\n"
+        f"🌊 <b>Море:</b> {fmt_int(sea,'°')}\n\n"
+        f"📈 <b>Сегодня:</b> {fmt_int(tmin,'°')}…{fmt_int(tmax,'°')} • <b>Осадки:</b> {fmt_1(psum,' мм')}"
+    )
+
+
+def tg_send_message_html(text: str) -> int:
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": CHANNEL_ID,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }
+    r = requests.post(url, json=payload, timeout=30)
+    r.raise_for_status()
+    return r.json()["result"]["message_id"]
+
+
+def main():
+    tz = ZoneInfo(TZ)
+    now = datetime.now(tz)
+    print(f"[debug] Moscow now: {now:%Y-%m-%d %H:%M}")
+
+    state = load_state()
+    today = now.date().isoformat()
+
+    if not in_window(now):
+        print(
+            f"[skip] Not in window {POST_HOUR:02d}:{POST_START_MINUTE:02d}-"
+            f"{POST_HOUR:02d}:{POST_START_MINUTE + WINDOW_MINUTES - 1:02d}"
+        )
+        return
+
+    if state.get("last_post_date") == today:
+        print("[skip] Already posted today")
+        return
+
+    weather = get_weather_text(now)
+    horoscope = get_horoscope_and_advance(state)
+    text = f"{weather}\n\n{horoscope}"
+
+    mid = tg_send_message_html(text)
+    print(f"[ok] sent message_id={mid}")
+
+    state["last_post_date"] = today
+    save_state(state)
+
+
+if __name__ == "__main__":
+    main()
