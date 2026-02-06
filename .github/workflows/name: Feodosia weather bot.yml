@@ -1,9 +1,9 @@
 # .github/workflows/weather.yml
-name: Feodosia weather (12:00 MSK window)
+name: Feodosia weather (13:00 MSK)
 
 on:
   schedule:
-    - cron: "*/5 * * * *"  # каждые 5 минут, бот отправит 1 раз в окне 12:00–12:09 MSK
+    - cron: "*/5 * * * *"  # каждые 5 минут, бот отправит 1 раз в окне 13:00–13:19 MSK
   workflow_dispatch:
 
 permissions:
@@ -45,3 +45,4 @@ jobs:
           git diff --cached --quiet && echo "No changes to commit" && exit 0
           git commit -m "Update state.json"
           git push
+
