@@ -13,12 +13,10 @@ LAT = 45.053637
 LON = 35.390155
 TZ = "Europe/Moscow"
 
-# 10:00 MSK post, 22:00 MSK delete
+# Окна времени (в минутах): "примерно в 10" и "примерно в 22"
 POST_HOUR = 10
-POST_MINUTE = 0
-
 DELETE_HOUR = 22
-DELETE_MINUTE = 0
+WINDOW_MINUTES = 20  # можно 10/15/30 — как вам нужно
 
 RETRIES = 2
 BACKOFF_BASE = 2
@@ -148,24 +146,20 @@ def first_or_none(x):
     return x
 
 
+def is_within_window(now: datetime, target_hour: int, window_minutes: int) -> bool:
+    # окно: target_hour:00 ... target_hour:(window_minutes-1)
+    return now.hour == target_hour and 0 <= now.minute < window_minutes
+
+
 def get_weather_text(now: datetime):
     tz = ZoneInfo(TZ)
 
-    # Метка времени в тексте (10:00)
-    target_dt_label = datetime.combine(
-        now.date(),
-        dtime(hour=POST_HOUR, minute=POST_MINUTE),
-        tzinfo=tz,
-    )
-    time_label = target_dt_label.strftime("%H:%M")
+    # Пишем реальное время отправки (примерно 10:xx)
+    time_label = now.strftime("%H:%M")
 
-    # Для Open-Meteo hourly используем ровный час (у нас и так 10:00)
-    target_dt_api = datetime.combine(
-        now.date(),
-        dtime(hour=POST_HOUR, minute=0),
-        tzinfo=tz,
-    )
-    hour_str = build_hour_string_for_api(target_dt_api)
+    # Для hourly берём ближайший час вниз (10:00, 10:xx -> 10:00)
+    api_dt = datetime.combine(now.date(), dtime(hour=now.hour, minute=0), tzinfo=tz)
+    hour_str = build_hour_string_for_api(api_dt)
 
     forecast = request_json(
         "https://api.open-meteo.com/v1/forecast",
@@ -204,71 +198,36 @@ def get_weather_text(now: datetime):
         wind_part += f" (напр. {round(wind_dir)}°)"
 
     return (
-        f"🌞 <b>Доброе утро, Феодосия!</b> {time_label}\n\n"
-        f"🌡️ <b>Воздух:</b> {fmt_int(air,'°')} (ощущается {fmt_int(feels,'°')})\n\n"
-        f"💨 <b>Ветер:</b> {wind_part} • <b>Осадки:</b> {fmt_1(precip,' мм')}\n\n"
-        f"🌊 <b>Море:</b> {fmt_int(sea,'°')}\n\n"
-        f"📈 <b>Сегодня:</b> {fmt_int(tmin,'°')}…{fmt_int(tmax,'°')} • <b>Осадки:</b> {fmt_1(psum,' мм')}"
-    )
+        f"🌞 print(f"[delete] Not in window {DELETE_HOUR:02d}:00-{DELETE_HOUR:02d}:{WINDOW_MINUTES-1:02d} {TZ} now ({now:%H:%M}). Skip.")
+            return
 
-
-def get_horoscope_and_advance(state):
-    idx = int(state.get("horoscope_index", 0) or 0)
-    line = HOROSCOPE_LINES[idx % len(HOROSCOPE_LINES)]
-    state["horoscope_index"] = (idx + 1) % len(HOROSCOPE_LINES)
-    return line
-
-
-def tg_send_message_html(text: str) -> int:
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": CHANNEL_ID,
-        "text": text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True,
-    }
-    r = requests.post(url, json=payload, timeout=30)
-    r.raise_for_status()
-    data = r.json()
-    return data["result"]["message_id"]
-
-
-def tg_delete_message(message_id: int):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteMessage"
-    payload = {"chat_id": CHANNEL_ID, "message_id": int(message_id)}
-    r = requests.post(url, json=payload, timeout=30)
-    r.raise_for_status()
-
-
-def main(argv=None):
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--delete", action="store_true", help="delete the morning message")
-    args = parser.parse_args(argv or [])
-
-    tz = ZoneInfo(TZ)
-    now = datetime.now(tz)
-    state = load_state()
-
-    if args.delete:
-        if not (now.hour == DELETE_HOUR and now.minute == DELETE_MINUTE):
-            print(
-                f"[delete] Not {DELETE_HOUR:02d}:{DELETE_MINUTE:02d} in {TZ} now ({now:%H:%M}). Skip."
-            )
+        # защита от повторного удаления в тот же день
+        if state.get("last_delete_date") == now.date().isoformat():
+            print("[delete] Already deleted today. Skip.")
             return
 
         mid = state.get("last_message_id")
         if not mid:
             print("[delete] No last_message_id in state.json. Nothing to delete.")
+            state["last_delete_date"] = now.date().isoformat()
+            save_state(state)
             return
 
         tg_delete_message(int(mid))
         print("[delete] OK")
         state.pop("last_message_id", None)
+        state["last_delete_date"] = now.date().isoformat()
         save_state(state)
         return
 
-    if not (now.hour == POST_HOUR and now.minute == POST_MINUTE):
-        print(f"[post] Not {POST_HOUR:02d}:{POST_MINUTE:02d} in {TZ} now ({now:%H:%M}). Skip.")
+    # post
+    if not is_within_window(now, POST_HOUR, WINDOW_MINUTES):
+        print(f"[post] Not in window {POST_HOUR:02d}:00-{POST_HOUR:02d}:{WINDOW_MINUTES-1:02d} {TZ} now ({now:%H:%M}). Skip.")
+        return
+
+    # защита от двойной отправки в один день
+    if state.get("last_post_date") == now.date().isoformat():
+        print("[post] Already posted today. Skip.")
         return
 
     weather = get_weather_text(now)
@@ -279,9 +238,11 @@ def main(argv=None):
     print(f"[post] OK message_id={message_id}")
 
     state["last_message_id"] = message_id
+    state["last_post_date"] = now.date().isoformat()
     save_state(state)
 
 
 if __name__ == "__main__":
     main()
+
 
