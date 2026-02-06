@@ -1,3 +1,4 @@
+# bot.py
 import os
 import sys
 import json
@@ -5,17 +6,19 @@ import time
 import argparse
 from datetime import datetime, time as dtime
 from zoneinfo import ZoneInfo
+
 import requests
 
 LAT = 45.053637
 LON = 35.390155
 TZ = "Europe/Moscow"
 
+# Под ваш YAML (09:13 MSK пост, 21:13 MSK удаление)
 POST_HOUR = 9
-POST_MINUTE = 8
+POST_MINUTE = 13
 
 DELETE_HOUR = 21
-DELETE_MINUTE = 8
+DELETE_MINUTE = 13
 
 RETRIES = 2
 BACKOFF_BASE = 2
@@ -83,19 +86,22 @@ HOROSCOPE_LINES = [
     "🎈 <b>Гороскоп дня:</b> Добавьте радости в рутину — это даст энергию.",
 ]
 
+
 def load_state():
     if not os.path.exists(STATE_PATH):
         return {}
     try:
         with open(STATE_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
-            return data if isinstance(data, dict) else {}
+        return data if isinstance(data, dict) else {}
     except Exception:
         return {}
+
 
 def save_state(state):
     with open(STATE_PATH, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False)
+
 
 def request_json(url: str, params: dict, retries: int = RETRIES):
     last_exc = None
@@ -110,6 +116,7 @@ def request_json(url: str, params: dict, retries: int = RETRIES):
                 time.sleep(BACKOFF_BASE * (attempt + 1))
     raise last_exc
 
+
 def pick_hour_value(data: dict, hour_str: str, field: str):
     hourly = (data or {}).get("hourly") or {}
     times = hourly.get("time") or []
@@ -120,14 +127,18 @@ def pick_hour_value(data: dict, hour_str: str, field: str):
         return None
     return values[idx] if idx < len(values) else None
 
+
 def fmt_int(x, suffix=""):
     return "—" if x is None else f"{round(x)}{suffix}"
+
 
 def fmt_1(x, suffix=""):
     return "—" if x is None else f"{x:.1f}{suffix}"
 
+
 def build_hour_string_for_api(dt: datetime):
     return dt.strftime("%Y-%m-%dT%H:%M")
+
 
 def first_or_none(x):
     if x is None:
@@ -136,9 +147,15 @@ def first_or_none(x):
         return x[0]
     return x
 
+
 def get_weather_text(now: datetime):
     tz = ZoneInfo(TZ)
-    target_dt = datetime.combine(now.date(), dtime(hour=POST_HOUR), tzinfo=tz)
+
+    target_dt = datetime.combine(
+        now.date(),
+        dtime(hour=POST_HOUR, minute=POST_MINUTE),
+        tzinfo=tz,
+    )
     hour_str = build_hour_string_for_api(target_dt)
     time_label = target_dt.strftime("%H:%M")
 
@@ -186,11 +203,13 @@ def get_weather_text(now: datetime):
         f"📈 <b>Сегодня:</b> {fmt_int(tmin,'°')}…{fmt_int(tmax,'°')} • <b>Осадки:</b> {fmt_1(psum,' мм')}"
     )
 
+
 def get_horoscope_and_advance(state):
     idx = int(state.get("horoscope_index", 0) or 0)
     line = HOROSCOPE_LINES[idx % len(HOROSCOPE_LINES)]
     state["horoscope_index"] = (idx + 1) % len(HOROSCOPE_LINES)
     return line
+
 
 def tg_send_message_html(text: str) -> int:
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -203,14 +222,15 @@ def tg_send_message_html(text: str) -> int:
     r = requests.post(url, json=payload, timeout=30)
     r.raise_for_status()
     data = r.json()
-    # Возвращаем message_id, чтобы потом удалить
     return data["result"]["message_id"]
+
 
 def tg_delete_message(message_id: int):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteMessage"
     payload = {"chat_id": CHANNEL_ID, "message_id": int(message_id)}
     r = requests.post(url, json=payload, timeout=30)
     r.raise_for_status()
+
 
 def main(argv=None):
     parser = argparse.ArgumentParser()
@@ -222,9 +242,10 @@ def main(argv=None):
     state = load_state()
 
     if args.delete:
-        # Удаляем в 18:00
-        if now.hour != DELETE_HOUR:
-            print(f"[delete] Not {DELETE_HOUR:02d}:00 in {TZ} now ({now:%H:%M}). Skip.")
+        if not (now.hour == DELETE_HOUR and now.minute == DELETE_MINUTE):
+            print(
+                f"[delete] Not {DELETE_HOUR:02d}:{DELETE_MINUTE:02d} in {TZ} now ({now:%H:%M}). Skip."
+            )
             return
 
         mid = state.get("last_message_id")
@@ -238,9 +259,8 @@ def main(argv=None):
         save_state(state)
         return
 
-    # Постим в 06:00
-    if now.hour != POST_HOUR:
-        print(f"[post] Not {POST_HOUR:02d}:00 in {TZ} now ({now:%H:%M}). Skip.")
+    if not (now.hour == POST_HOUR and now.minute == POST_MINUTE):
+        print(f"[post] Not {POST_HOUR:02d}:{POST_MINUTE:02d} in {TZ} now ({now:%H:%M}). Skip.")
         return
 
     weather = get_weather_text(now)
@@ -252,6 +272,7 @@ def main(argv=None):
 
     state["last_message_id"] = message_id
     save_state(state)
+
 
 if __name__ == "__main__":
     main()
