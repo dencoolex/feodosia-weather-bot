@@ -13,12 +13,12 @@ LAT = 45.053637
 LON = 35.390155
 TZ = "Europe/Moscow"
 
-# Под ваш YAML (09:13 MSK пост, 21:13 MSK удаление)
-POST_HOUR = 9
-POST_MINUTE = 13
+# 10:00 MSK post, 22:00 MSK delete
+POST_HOUR = 10
+POST_MINUTE = 0
 
-DELETE_HOUR = 21
-DELETE_MINUTE = 13
+DELETE_HOUR = 22
+DELETE_MINUTE = 0
 
 RETRIES = 2
 BACKOFF_BASE = 2
@@ -151,13 +151,21 @@ def first_or_none(x):
 def get_weather_text(now: datetime):
     tz = ZoneInfo(TZ)
 
-    target_dt = datetime.combine(
+    # Метка времени в тексте (10:00)
+    target_dt_label = datetime.combine(
         now.date(),
         dtime(hour=POST_HOUR, minute=POST_MINUTE),
         tzinfo=tz,
     )
-    hour_str = build_hour_string_for_api(target_dt)
-    time_label = target_dt.strftime("%H:%M")
+    time_label = target_dt_label.strftime("%H:%M")
+
+    # Для Open-Meteo hourly используем ровный час (у нас и так 10:00)
+    target_dt_api = datetime.combine(
+        now.date(),
+        dtime(hour=POST_HOUR, minute=0),
+        tzinfo=tz,
+    )
+    hour_str = build_hour_string_for_api(target_dt_api)
 
     forecast = request_json(
         "https://api.open-meteo.com/v1/forecast",
