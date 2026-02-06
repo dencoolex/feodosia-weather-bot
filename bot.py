@@ -3,8 +3,7 @@ import os
 import sys
 import json
 import time
-import argparse
-from datetime import datetime, time as dtime
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import requests
@@ -13,19 +12,11 @@ LAT = 45.053637
 LON = 35.390155
 TZ = "Europe/Moscow"
 
-# ТЕСТОВОЕ ОКНО (MSK):
-# Пост: примерно в 11:15 (окно 11:15–11:24)
-# Удаление: примерно в 23:15 (окно 23:15–23:24)
-POST_HOUR = 11
-POST_START_MINUTE = 15
+# Окно отправки: 12:00–12:09 (MSK)
+POST_HOUR = 12
+POST_START_MINUTE = 0
+WINDOW_MINUTES = 10
 
-DELETE_HOUR = 23
-DELETE_START_MINUTE = 15
-
-WINDOW_MINUTES = 10  # 10 минут
-
-RETRIES = 2
-BACKOFF_BASE = 2
 STATE_PATH = "state.json"
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -107,17 +98,24 @@ def save_state(state):
         json.dump(state, f, ensure_ascii=False)
 
 
-def request_json(url: str, params: dict, retries: int = RETRIES):
+def in_window(now: datetime) -> bool:
+    return (
+        now.hour == POST_HOUR
+        and POST_START_MINUTE <= now.minute < (POST_START_MINUTE + WINDOW_MINUTES)
+    )
+
+
+def request_json(url: str, params: dict, retries: int = 2):
     last_exc = None
     for attempt in range(retries + 1):
         try:
-            resp = requests.get(url, params=params, timeout=30)
-            resp.raise_for_status()
-            return resp.json()
+            r = requests.get(url, params=params, timeout=30)
+            r.raise_for_status()
+            return r.json()
         except requests.RequestException as e:
             last_exc = e
             if attempt < retries:
-                time.sleep(BACKOFF_BASE * (attempt + 1))
+                time.sleep(2 * (attempt + 1))
     raise last_exc
 
 
@@ -132,18 +130,6 @@ def pick_hour_value(data: dict, hour_str: str, field: str):
     return values[idx] if idx < len(values) else None
 
 
-def fmt_int(x, suffix=""):
-    return "—" if x is None else f"{round(x)}{suffix}"
-
-
-def fmt_1(x, suffix=""):
-    return "—" if x is None else f"{x:.1f}{suffix}"
-
-
-def build_hour_string_for_api(dt: datetime):
-    return dt.strftime("%Y-%m-%dT%H:%M")
-
-
 def first_or_none(x):
     if x is None:
         return None
@@ -152,16 +138,24 @@ def first_or_none(x):
     return x
 
 
-def in_window(now: datetime, hour: int, start_minute: int, window_minutes: int) -> bool:
-    return now.hour == hour and start_minute <= now.minute < (start_minute + window_minutes)
+def fmt_int(x, suffix=""):
+    return "—" if x is None else f"{round(x)}{suffix}"
 
 
-def get_weather_text(now: datetime):
-    tz = ZoneInfo(TZ)
-    time_label = now.strftime("%H:%M")
+def fmt_1(x, suffix=""):
+    return "—" if x is None else f"{x:.1f}{suffix}"
 
-    api_dt = datetime.combine(now.date(), dtime(hour=now.hour, minute=0), tzinfo=tz)
-    hour_str = build_hour_string_for_api(api_dt)
+
+def get_horoscope_and_advance(state: dict) -> str:
+    idx = int(state.get("horoscope_index", 0) or 0)
+    line = HOROSCOPE_LINES[idx % len(HOROSCOPE_LINES)]
+    state["horoscope_index"] = (idx + 1) % len(HOROSCOPE_LINES)
+    return line
+
+
+def get_weather_text(now: datetime) -> str:
+    # Берём ближайший час вниз, чтобы значение точно было (12:05 -> 12:00)
+    hour_str = now.replace(minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M")
 
     forecast = request_json(
         "https://api.open-meteo.com/v1/forecast",
@@ -199,20 +193,15 @@ def get_weather_text(now: datetime):
     if wind_dir is not None:
         wind_part += f" (напр. {round(wind_dir)}°)"
 
+    time_label = now.strftime("%H:%M")
+
     return (
-        f"🌞 <b>Доброе утро, Феодосия!</b> {time_label}\n\n"
+        f"🌞 <b>Феодосия</b> {time_label}\n\n"
         f"🌡️ <b>Воздух:</b> {fmt_int(air,'°')} (ощущается {fmt_int(feels,'°')})\n\n"
         f"💨 <b>Ветер:</b> {wind_part} • <b>Осадки:</b> {fmt_1(precip,' мм')}\n\n"
         f"🌊 <b>Море:</b> {fmt_int(sea,'°')}\n\n"
         f"📈 <b>Сегодня:</b> {fmt_int(tmin,'°')}…{fmt_int(tmax,'°')} • <b>Осадки:</b> {fmt_1(psum,' мм')}"
     )
-
-
-def get_horoscope_and_advance(state):
-    idx = int(state.get("horoscope_index", 0) or 0)
-    line = HOROSCOPE_LINES[idx % len(HOROSCOPE_LINES)]
-    state["horoscope_index"] = (idx + 1) % len(HOROSCOPE_LINES)
-    return line
 
 
 def tg_send_message_html(text: str) -> int:
@@ -225,56 +214,42 @@ def tg_send_message_html(text: str) -> int:
     }
     r = requests.post(url, json=payload, timeout=30)
     r.raise_for_status()
-    data = r.json()
-    return data["result"]["message_id"]
+    return r.json()["result"]["message_id"]
 
 
-def tg_delete_message(message_id: int):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteMessage"
-    payload = {"chat_id": CHANNEL_ID, "message_id": int(message_id)}
-    r = requests.post(url, json=payload, timeout=30)
-    r.raise_for_status()
-
-
-def main(argv=None):
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--delete", action="store_true", help="delete the last message")
-    args = parser.parse_args(argv or [])
-
+def main():
     tz = ZoneInfo(TZ)
     now = datetime.now(tz)
+    print(f"[debug] Moscow now: {now:%Y-%m-%d %H:%M}")
+
     state = load_state()
+    today = now.date().isoformat()
 
-    if args.delete:
-        if not in_window(now, DELETE_HOUR, DELETE_START_MINUTE, WINDOW_MINUTES):
-            return
-        if state.get("last_delete_date") == now.date().isoformat():
-            return
-
-        mid = state.get("last_message_id")
-        if mid:
-            tg_delete_message(int(mid))
-
-        state.pop("last_message_id", None)
-        state["last_delete_date"] = now.date().isoformat()
-        save_state(state)
+    if not in_window(now):
+        print(
+            f"[skip] Not in window {POST_HOUR:02d}:{POST_START_MINUTE:02d}-"
+            f"{POST_HOUR:02d}:{POST_START_MINUTE+WINDOW_MINUTES-1:02d}"
+        )
         return
 
-    # post
-    if not in_window(now, POST_HOUR, POST_START_MINUTE, WINDOW_MINUTES):
-        return
-    if state.get("last_post_date") == now.date().isoformat():
+    if state.get("last_post_date") == today:
+        print("[skip] Already posted today")
         return
 
     weather = get_weather_text(now)
     horoscope = get_horoscope_and_advance(state)
-    post = f"{weather}\n\n{horoscope}"
+    text = f"{weather}\n\n{horoscope}"
 
-    message_id = tg_send_message_html(post)
+    mid = tg_send_message_html(text)
+    print(f"[ok] sent message_id={mid}")
 
-    state["last_message_id"] = message_id
-    state["last_post_date"] = now.date().isoformat()
+    state["last_post_date"] = today
     save_state(state)
+
+
+if __name__ == "__main__":
+    main()
+
 
 
 if __name__ == "__main__":
