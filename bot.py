@@ -13,10 +13,16 @@ LAT = 45.053637
 LON = 35.390155
 TZ = "Europe/Moscow"
 
-# "примерно в 10" и "примерно в 22"
+# ОКНА ВРЕМЕНИ (MSK):
+# Пост: примерно в 10:50 (окно 10:50–10:59)
+# Удаление: примерно в 22:50 (окно 22:50–22:59)
 POST_HOUR = 10
+POST_START_MINUTE = 50
+
 DELETE_HOUR = 22
-WINDOW_MINUTES = 20  # окно 10:00-10:19 и 22:00-22:19
+DELETE_START_MINUTE = 50
+
+WINDOW_MINUTES = 10  # 10 минут: 50..59
 
 RETRIES = 2
 BACKOFF_BASE = 2
@@ -146,8 +152,8 @@ def first_or_none(x):
     return x
 
 
-def is_within_window(now: datetime, target_hour: int, window_minutes: int) -> bool:
-    return now.hour == target_hour and 0 <= now.minute < window_minutes
+def in_window(now: datetime, hour: int, start_minute: int, window_minutes: int) -> bool:
+    return now.hour == hour and start_minute <= now.minute < (start_minute + window_minutes)
 
 
 def get_weather_text(now: datetime):
@@ -156,7 +162,7 @@ def get_weather_text(now: datetime):
     # В тексте показываем фактическое время отправки
     time_label = now.strftime("%H:%M")
 
-    # Для Open-Meteo hourly берём ближайший час вниз (10:xx -> 10:00)
+    # Для hourly берём ближайший час вниз (например 10:54 -> 10:00), чтобы не было "—"
     api_dt = datetime.combine(now.date(), dtime(hour=now.hour, minute=0), tzinfo=tz)
     hour_str = build_hour_string_for_api(api_dt)
 
@@ -243,43 +249,26 @@ def main(argv=None):
     state = load_state()
 
     if args.delete:
-        if not is_within_window(now, DELETE_HOUR, WINDOW_MINUTES):
-            print(
-                f"[delete] Not in window {DELETE_HOUR:02d}:00-{DELETE_HOUR:02d}:{WINDOW_MINUTES-1:02d} "
-                f"{TZ} now ({now:%H:%M}). Skip."
-            )
+        if not in_window(now, DELETE_HOUR, DELETE_START_MINUTE, WINDOW_MINUTES):
             return
 
-        # защита от повторного удаления в тот же день
         if state.get("last_delete_date") == now.date().isoformat():
-            print("[delete] Already deleted today. Skip.")
             return
 
         mid = state.get("last_message_id")
-        if not mid:
-            print("[delete] No last_message_id in state.json. Nothing to delete.")
-            state["last_delete_date"] = now.date().isoformat()
-            save_state(state)
-            return
+        if mid:
+            tg_delete_message(int(mid))
 
-        tg_delete_message(int(mid))
-        print("[delete] OK")
         state.pop("last_message_id", None)
         state["last_delete_date"] = now.date().isoformat()
         save_state(state)
         return
 
     # post
-    if not is_within_window(now, POST_HOUR, WINDOW_MINUTES):
-        print(
-            f"[post] Not in window {POST_HOUR:02d}:00-{POST_HOUR:02d}:{WINDOW_MINUTES-1:02d} "
-            f"{TZ} now ({now:%H:%M}). Skip."
-        )
+    if not in_window(now, POST_HOUR, POST_START_MINUTE, WINDOW_MINUTES):
         return
 
-    # защита от двойной отправки в один день
     if state.get("last_post_date") == now.date().isoformat():
-        print("[post] Already posted today. Skip.")
         return
 
     weather = get_weather_text(now)
@@ -287,7 +276,6 @@ def main(argv=None):
     post = f"{weather}\n\n{horoscope}"
 
     message_id = tg_send_message_html(post)
-    print(f"[post] OK message_id={message_id}")
 
     state["last_message_id"] = message_id
     state["last_post_date"] = now.date().isoformat()
