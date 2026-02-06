@@ -1,9 +1,9 @@
-name: Feodosia weather (post 09:13 MSK, delete 21:13 MSK)
+name: Feodosia weather (post 10:00 MSK, delete 22:00 MSK)
 
 on:
   schedule:
-    - cron: "13 6 * * *"    # 09:13 MSK (UTC+3)
-    - cron: "13 18 * * *"   # 21:13 MSK (UTC+3)
+    - cron: "0 7 * * *"    # 10:00 MSK (UTC+3)
+    - cron: "0 19 * * *"   # 22:00 MSK (UTC+3)
   workflow_dispatch:
 
 permissions:
@@ -39,14 +39,14 @@ jobs:
           MIN_UTC=$(date -u +%M)
           echo "UTC now: ${HOUR_UTC}:${MIN_UTC}"
 
-          # 06:13 UTC = 09:13 MSK
-          if [ "$HOUR_UTC" = "06" ] && [ "$MIN_UTC" = "13" ]; then
+          # 07:00 UTC = 10:00 MSK
+          if [ "$HOUR_UTC" = "07" ] && [ "$MIN_UTC" = "00" ]; then
             python bot.py
             exit 0
           fi
 
-          # 18:13 UTC = 21:13 MSK
-          if [ "$HOUR_UTC" = "18" ] && [ "$MIN_UTC" = "13" ]; then
+          # 19:00 UTC = 22:00 MSK
+          if [ "$HOUR_UTC" = "19" ] && [ "$MIN_UTC" = "00" ]; then
             python bot.py --delete
             exit 0
           fi
@@ -62,3 +62,4 @@ jobs:
           git diff --cached --quiet && echo "No changes to commit" && exit 0
           git commit -m "Update state.json"
           git push
+
