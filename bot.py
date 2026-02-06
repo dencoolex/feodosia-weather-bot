@@ -12,10 +12,10 @@ LAT = 45.053637
 LON = 35.390155
 TZ = "Europe/Moscow"
 
-# Окно отправки: 12:00–12:09 (MSK)
-POST_HOUR = 12
+# Окно отправки: 13:00–13:19 (MSK) — чтобы не пропустить из-за задержек GitHub
+POST_HOUR = 13
 POST_START_MINUTE = 0
-WINDOW_MINUTES = 10
+WINDOW_MINUTES = 20
 
 STATE_PATH = "state.json"
 
@@ -154,7 +154,7 @@ def get_horoscope_and_advance(state: dict) -> str:
 
 
 def get_weather_text(now: datetime) -> str:
-    # Берём ближайший час вниз, чтобы значение точно было (12:05 -> 12:00)
+    # Почасовые данные Open-Meteo — по ровным часам; берём час вниз
     hour_str = now.replace(minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M")
 
     forecast = request_json(
@@ -249,6 +249,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
