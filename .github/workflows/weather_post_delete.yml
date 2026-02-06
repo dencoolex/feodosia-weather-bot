@@ -1,13 +1,17 @@
-name: Feodosia weather (post 09:08 MSK, delete 21:08 MSK)
+name: Feodosia weather (post 09:13 MSK, delete 21:13 MSK)
 
 on:
   schedule:
-    - cron: "8 6 * * *"    # 09:08 MSK (UTC+3)
-    - cron: "8 18 * * *"   # 21:08 MSK (UTC+3)
+    - cron: "13 6 * * *"    # 09:13 MSK (UTC+3)
+    - cron: "13 18 * * *"   # 21:13 MSK (UTC+3)
   workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: feodosia-weather
+  cancel-in-progress: true
 
 jobs:
   run:
@@ -26,15 +30,29 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # Важно: убрали проверки UTC часа.
-      # bot.py сам решает по времени MSK: постить/удалять/пропустить.
-      - name: Run bot
+      - name: Run bot (post in morning, delete in evening)
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
         run: |
-          python bot.py
-          python bot.py --delete
+          HOUR_UTC=$(date -u +%H)
+          MIN_UTC=$(date -u +%M)
+          echo "UTC now: ${HOUR_UTC}:${MIN_UTC}"
+
+          # 06:13 UTC = 09:13 MSK
+          if [ "$HOUR_UTC" = "06" ] && [ "$MIN_UTC" = "13" ]; then
+            python bot.py
+            exit 0
+          fi
+
+          # 18:13 UTC = 21:13 MSK
+          if [ "$HOUR_UTC" = "18" ] && [ "$MIN_UTC" = "13" ]; then
+            python bot.py --delete
+            exit 0
+          fi
+
+          echo "Not a scheduled minute, exit."
+          exit 0
 
       - name: Commit state.json
         run: |
@@ -44,4 +62,3 @@ jobs:
           git diff --cached --quiet && echo "No changes to commit" && exit 0
           git commit -m "Update state.json"
           git push
-
