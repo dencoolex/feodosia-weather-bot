@@ -4,10 +4,8 @@ name: Feodosia weather (07:00 MSK)
 on:
   # GitHub cron = UTC, 07:00 МСК = 04:00 UTC
   schedule:
-    - cron: "0 4 * * *"
-    - cron: "5 4 * * *"
-    - cron: "10 4 * * *"
-    - cron: "15 4 * * *"
+    - cron: "* * * * *"
+
   workflow_dispatch:
 
 permissions:
