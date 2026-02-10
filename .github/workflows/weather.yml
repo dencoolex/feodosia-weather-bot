@@ -1,11 +1,15 @@
 # .github/workflows/weather.yml
-name: Feodosia weather (07:00 MSK)
+name: Feodosia weather (05:00–08:00 MSK)
 
 on:
-  # GitHub cron = UTC, 07:00 МСК = 04:00 UTC
+  # GitHub cron = UTC
+  # 05:00–08:00 МСК = 02:00–05:00 UTC
+  # Запуск каждые 5 минут строго в этом диапазоне.
   schedule:
-    - cron: "* * * * *"
-
+    - cron: "*/5 2 * * *"  # 05:00–05:55 MSK
+    - cron: "*/5 3 * * *"  # 06:00–06:55 MSK
+    - cron: "*/5 4 * * *"  # 07:00–07:55 MSK
+    - cron: "0 5 * * *"    # ровно 08:00 MSK (05:00 UTC) и всё, дальше не запускаем
   workflow_dispatch:
 
 permissions:
