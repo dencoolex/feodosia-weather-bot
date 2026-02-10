@@ -12,10 +12,11 @@ LAT = 45.053637
 LON = 35.390155
 TZ = "Europe/Moscow"
 
-# Окно отправки: 07:00–07:19 (MSK)
-POST_HOUR = 7
+# Окно отправки: 05:00–08:00 (MSK)
+POST_HOUR = 5
 POST_START_MINUTE = 0
-WINDOW_MINUTES = 20
+WINDOW_MINUTES = 180  # 05:00–07:59
+
 
 STATE_PATH = "state.json"
 
