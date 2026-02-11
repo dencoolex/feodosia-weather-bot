@@ -3,7 +3,7 @@ import os
 import sys
 import json
 import time
-from datetime import datetime
+from datetime import datetime, time as dtime
 from zoneinfo import ZoneInfo
 
 import requests
@@ -12,11 +12,9 @@ LAT = 45.053637
 LON = 35.390155
 TZ = "Europe/Moscow"
 
-# Окно отправки: 05:00–08:00 (MSK)
-POST_HOUR = 5
-POST_START_MINUTE = 0
-WINDOW_MINUTES = 180  # 05:00–07:59
-
+# Окно отправки: 05:00–08:00 (MSK) (08:00 включительно)
+WINDOW_START = dtime(5, 0)
+WINDOW_END = dtime(8, 0)
 
 STATE_PATH = "state.json"
 
@@ -100,10 +98,8 @@ def save_state(state):
 
 
 def in_window(now: datetime) -> bool:
-    return (
-        now.hour == POST_HOUR
-        and POST_START_MINUTE <= now.minute < (POST_START_MINUTE + WINDOW_MINUTES)
-    )
+    t = now.time()
+    return WINDOW_START <= t <= WINDOW_END
 
 
 def request_json(url: str, params: dict, retries: int = 2):
@@ -227,8 +223,8 @@ def main():
 
     if not in_window(now):
         print(
-            f"[skip] Not in window {POST_HOUR:02d}:{POST_START_MINUTE:02d}-"
-            f"{POST_HOUR:02d}:{POST_START_MINUTE + WINDOW_MINUTES - 1:02d}"
+            f"[skip] Not in window {WINDOW_START.strftime('%H:%M')}-"
+            f"{WINDOW_END.strftime('%H:%M')}"
         )
         return
 
