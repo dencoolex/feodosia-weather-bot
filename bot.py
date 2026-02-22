@@ -152,14 +152,15 @@ def get_horoscope_and_advance(state: dict) -> str:
 
 def get_weather_text(now: datetime) -> str:
     hour_str = now.replace(minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M")
+    time_label = now.strftime("%H:%M")
 
     forecast = request_json(
         "https://api.open-meteo.com/v1/forecast",
         {
             "latitude": LAT,
             "longitude": LON,
-            "hourly": "temperature_2m,apparent_temperature,precipitation,wind_speed_10m,winddirection_10m",
-            "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum",
+            "hourly": "temperature_2m,apparent_temperature,wind_speed_10m,winddirection_10m",
+            "daily": "temperature_2m_max,temperature_2m_min,sunrise,sunset",
             "timezone": TZ,
         },
     )
@@ -177,26 +178,30 @@ def get_weather_text(now: datetime) -> str:
     feels = pick_hour_value(forecast, hour_str, "apparent_temperature")
     wind = pick_hour_value(forecast, hour_str, "wind_speed_10m")
     wind_dir = pick_hour_value(forecast, hour_str, "winddirection_10m")
-    precip = pick_hour_value(forecast, hour_str, "precipitation")
     sea = pick_hour_value(marine, hour_str, "sea_surface_temperature")
 
     daily = forecast.get("daily", {}) or {}
     tmax = first_or_none(daily.get("temperature_2m_max"))
     tmin = first_or_none(daily.get("temperature_2m_min"))
-    psum = first_or_none(daily.get("precipitation_sum"))
+
+    sunrise_raw = first_or_none(daily.get("sunrise"))
+    sunset_raw = first_or_none(daily.get("sunset"))
+
+    sunrise = sunrise_raw[11:16] if isinstance(sunrise_raw, str) and len(sunrise_raw) >= 16 else "—"
+    sunset = sunset_raw[11:16] if isinstance(sunset_raw, str) and len(sunset_raw) >= 16 else "—"
 
     wind_part = fmt_int(wind, " м/с")
     if wind_dir is not None:
         wind_part += f" (напр. {round(wind_dir)}°)"
 
-    time_label = now.strftime("%H:%M")
-
     return (
         f"🌞 <b>Феодосия</b> {time_label}\n\n"
+        f"🌅 <b>Восход:</b> {sunrise}\n\n"
+        f"🌇 <b>Закат:</b> {sunset}\n\n"
         f"🌡️ <b>Воздух:</b> {fmt_int(air,'°')} (ощущается {fmt_int(feels,'°')})\n\n"
-        f"💨 <b>Ветер:</b> {wind_part} • <b>Осадки:</b> {fmt_1(precip,' мм')}\n\n"
+        f"💨 <b>Ветер:</b> {wind_part}\n"
         f"🌊 <b>Море:</b> {fmt_int(sea,'°')}\n\n"
-        f"📈 <b>Сегодня:</b> {fmt_int(tmin,'°')}…{fmt_int(tmax,'°')} • <b>Осадки:</b> {fmt_1(psum,' мм')}"
+        f"📈 <b>Сегодня:</b> {fmt_int(tmin,'°')}…{fmt_int(tmax,'°')}"
     )
 
 
